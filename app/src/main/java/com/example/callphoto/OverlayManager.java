@@ -10,6 +10,8 @@ import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
@@ -31,6 +33,7 @@ public class OverlayManager {
 
     private static View overlay;
     private static WindowManager windowManager;
+    private static final Handler handler = new Handler(Looper.getMainLooper());
 
     public static synchronized void show(Context context, String number) {
         hide();
@@ -93,25 +96,51 @@ public class OverlayManager {
         lp.bottomMargin = (int) (24 * dm.density);
         root.addView(label, lp);
 
-        int type = Build.VERSION.SDK_INT >= 26
-                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                : WindowManager.LayoutParams.TYPE_PHONE;
+        int[] types = Build.VERSION.SDK_INT >= 26
+                ? new int[]{WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY}
+                : new int[]{2010 /* TYPE_SYSTEM_ERROR */, 2007 /* TYPE_PRIORITY_PHONE */,
+                        WindowManager.LayoutParams.TYPE_PHONE};
 
+        for (int t : types) {
+            if (attach(root, height, t)) {
+                overlay = root;
+                final View r = root;
+                final int h = height;
+                final int tt = t;
+                // چند لحظه بعد دوباره اضافه می‌کنیم تا حتماً بالای صفحه تماس باشد
+                handler.postDelayed(() -> {
+                    synchronized (OverlayManager.class) {
+                        if (overlay == r) {
+                            try {
+                                windowManager.removeView(r);
+                            } catch (Exception ignored) {
+                            }
+                            attach(r, h, tt);
+                        }
+                    }
+                }, 700);
+                break;
+            }
+        }
+    }
+
+    private static boolean attach(View v, int height, int type) {
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 height,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-
         try {
-            windowManager.addView(root, params);
-            overlay = root;
-        } catch (Exception ignored) {
+            windowManager.addView(v, params);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
